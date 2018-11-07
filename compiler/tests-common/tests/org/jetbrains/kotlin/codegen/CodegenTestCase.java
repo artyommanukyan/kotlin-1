@@ -22,7 +22,7 @@ import org.jetbrains.kotlin.TestsCompiletimeError;
 import org.jetbrains.kotlin.TestsCompilerError;
 import org.jetbrains.kotlin.backend.common.output.OutputFile;
 import org.jetbrains.kotlin.backend.common.output.SimpleOutputFileCollection;
-import org.jetbrains.kotlin.checkers.CheckerTestUtil;
+import org.jetbrains.kotlin.checkers.utils.CheckerTestUtil;
 import org.jetbrains.kotlin.checkers.CompilerTestLanguageVersionSettings;
 import org.jetbrains.kotlin.cli.common.CLIConfigurationKeys;
 import org.jetbrains.kotlin.cli.common.output.OutputUtilsKt;
@@ -42,7 +42,6 @@ import org.jetbrains.kotlin.test.KotlinTestUtils;
 import org.jetbrains.kotlin.test.TestJdkKind;
 import org.jetbrains.kotlin.test.clientserver.TestProxy;
 import org.jetbrains.kotlin.test.testFramework.KtUsefulTestCase;
-import org.jetbrains.kotlin.utils.ExceptionUtilsKt;
 import org.jetbrains.org.objectweb.asm.ClassReader;
 import org.jetbrains.org.objectweb.asm.tree.ClassNode;
 import org.jetbrains.org.objectweb.asm.tree.MethodNode;
@@ -70,7 +69,6 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static org.jetbrains.kotlin.checkers.CompilerTestLanguageVersionSettingsKt.API_VERSION_DIRECTIVE;
 import static org.jetbrains.kotlin.checkers.CompilerTestLanguageVersionSettingsKt.parseLanguageVersionSettings;
 import static org.jetbrains.kotlin.cli.common.output.OutputUtilsKt.writeAllTo;
 import static org.jetbrains.kotlin.codegen.CodegenTestUtil.*;
@@ -78,6 +76,7 @@ import static org.jetbrains.kotlin.codegen.TestUtilsKt.extractUrls;
 import static org.jetbrains.kotlin.test.KotlinTestUtils.getAnnotationsJar;
 import static org.jetbrains.kotlin.test.clientserver.TestProcessServerKt.getBoxMethodOrNull;
 import static org.jetbrains.kotlin.test.clientserver.TestProcessServerKt.getGeneratedClass;
+import static org.jetbrains.kotlin.utils.ExceptionUtilsKt.rethrow;
 
 public abstract class CodegenTestCase extends KtUsefulTestCase {
     private static final String DEFAULT_TEST_FILE_NAME = "a_test";
@@ -374,7 +373,7 @@ public abstract class CodegenTestCase extends KtUsefulTestCase {
         List<KtFile> ktFiles = new ArrayList<>(files.size());
         for (TestFile file : files) {
             if (file.name.endsWith(".kt")) {
-                String content = CheckerTestUtil.parseDiagnosedRanges(file.content, new ArrayList<>(0));
+                String content = CheckerTestUtil.INSTANCE.parseDiagnosedRanges(file.content, new ArrayList<>(0));
                 ktFiles.add(KotlinTestUtils.createFile(file.name, content, project));
             }
         }
@@ -463,7 +462,7 @@ public abstract class CodegenTestCase extends KtUsefulTestCase {
             return result;
         }
         catch (MalformedURLException e) {
-            throw ExceptionUtilsKt.rethrow(e);
+            throw rethrow(e);
         }
     }
 
@@ -629,7 +628,7 @@ public abstract class CodegenTestCase extends KtUsefulTestCase {
             return (Class<? extends Annotation>) initializedClassLoader.loadClass(fqName);
         }
         catch (ClassNotFoundException e) {
-            throw ExceptionUtilsKt.rethrow(e);
+            throw rethrow(e);
         }
     }
 
@@ -702,7 +701,7 @@ public abstract class CodegenTestCase extends KtUsefulTestCase {
                 kotlinOut = KotlinTestUtils.tmpDir(toString());
             }
             catch (IOException e) {
-                throw ExceptionUtilsKt.rethrow(e);
+                throw rethrow(e);
             }
 
             OutputUtilsKt.writeAllTo(classFileFactory, kotlinOut);
@@ -827,7 +826,7 @@ public abstract class CodegenTestCase extends KtUsefulTestCase {
                             javaFilesDir.set(KotlinTestUtils.tmpDir("java-files"));
                         }
                         catch (IOException e) {
-                            throw ExceptionUtilsKt.rethrow(e);
+                            throw rethrow(e);
                         }
                     }
                     writeSourceFile(fileName, text, javaFilesDir.get());

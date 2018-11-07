@@ -26,13 +26,19 @@ import com.intellij.util.containers.ContainerUtil
 import org.jetbrains.kotlin.asJava.getJvmSignatureDiagnostics
 import org.jetbrains.kotlin.checkers.BaseDiagnosticsTest.TestFile
 import org.jetbrains.kotlin.checkers.BaseDiagnosticsTest.TestModule
-import org.jetbrains.kotlin.checkers.CheckerTestUtil.ActualDiagnostic
+import org.jetbrains.kotlin.checkers.diagnostics.ActualDiagnostic
+import org.jetbrains.kotlin.checkers.diagnostics.PositionalTextDiagnostic
+import org.jetbrains.kotlin.checkers.diagnostics.TextDiagnostic
+import org.jetbrains.kotlin.checkers.diagnostics.factories.DebugInfoDiagnosticFactory0
+import org.jetbrains.kotlin.checkers.diagnostics.factories.SyntaxErrorDiagnosticFactory
+import org.jetbrains.kotlin.checkers.utils.CheckerTestUtil
 import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment
 import org.jetbrains.kotlin.config.JvmTarget
 import org.jetbrains.kotlin.config.LanguageFeature
 import org.jetbrains.kotlin.config.LanguageVersionSettings
 import org.jetbrains.kotlin.config.LanguageVersionSettingsImpl
 import org.jetbrains.kotlin.descriptors.DeclarationDescriptor
+import org.jetbrains.kotlin.descriptors.impl.ModuleDescriptorImpl
 import org.jetbrains.kotlin.diagnostics.*
 import org.jetbrains.kotlin.load.java.InternalFlexibleTypeTransformer
 import org.jetbrains.kotlin.name.FqName
@@ -41,6 +47,7 @@ import org.jetbrains.kotlin.psi.KtFile
 import org.jetbrains.kotlin.resolve.BindingContext
 import org.jetbrains.kotlin.resolve.MultiTargetPlatform
 import org.jetbrains.kotlin.test.KotlinTestUtils
+import org.jetbrains.kotlin.tests.di.createContainerForTests
 import org.jetbrains.kotlin.utils.addIfNotNull
 import org.junit.Assert
 import java.io.File
@@ -100,7 +107,9 @@ abstract class BaseDiagnosticsTest : KotlinMultiFileTestWithJava<TestModule, Tes
                 ktFiles.add(KotlinTestUtils.createFile("EXPLICIT_FLEXIBLE_TYPES.kt", EXPLICIT_FLEXIBLE_TYPES_DECLARATIONS, project))
             }
             if (declareCheckType) {
-                ktFiles.add(KotlinTestUtils.createFile("CHECK_TYPE.kt", CHECK_TYPE_DECLARATIONS, project))
+                val checkTypeDeclarations = File("$HELPERS_PATH/types/checkType.kt").readText()
+
+                ktFiles.add(KotlinTestUtils.createFile("CHECK_TYPE.kt", checkTypeDeclarations, project))
             }
         }
 
@@ -120,29 +129,28 @@ abstract class BaseDiagnosticsTest : KotlinMultiFileTestWithJava<TestModule, Tes
     }
 
     inner class TestFile(
-            val module: TestModule?,
-            val fileName: String,
-            textWithMarkers: String,
-            val directives: Map<String, String>
+        val module: TestModule?,
+        val fileName: String,
+        textWithMarkers: String,
+        val directives: Map<String, String>
     ) {
-        private val diagnosedRanges: List<CheckerTestUtil.DiagnosedRange> = ArrayList()
-        val actualDiagnostics: MutableList<ActualDiagnostic> = ArrayList()
+        private val diagnosedRanges: MutableList<DiagnosedRange> = mutableListOf()
+        val actualDiagnostics: MutableList<ActualDiagnostic> = mutableListOf()
         val expectedText: String
         val clearText: String
         private val createKtFile: Lazy<KtFile?>
         private val whatDiagnosticsToConsider: Condition<Diagnostic>
         val customLanguageVersionSettings: LanguageVersionSettings?
         val jvmTarget: JvmTarget?
-        val declareCheckType: Boolean
+        val declareCheckType: Boolean = CHECK_TYPE_DIRECTIVE in directives
         val declareFlexibleType: Boolean
         val checkLazyLog: Boolean
         private val markDynamicCalls: Boolean
-        val dynamicCallDescriptors: List<DeclarationDescriptor> = ArrayList()
+        val dynamicCallDescriptors: MutableList<DeclarationDescriptor> = mutableListOf()
         val withNewInferenceDirective: Boolean
         val newInferenceEnabled: Boolean
 
         init {
-            this.declareCheckType = CHECK_TYPE_DIRECTIVE in directives
             this.whatDiagnosticsToConsider = parseDiagnosticFilterDirective(directives, declareCheckType)
             this.customLanguageVersionSettings = parseLanguageVersionSettings(directives)
             this.jvmTarget = parseJvmTarget(directives)
@@ -156,8 +164,7 @@ abstract class BaseDiagnosticsTest : KotlinMultiFileTestWithJava<TestModule, Tes
                 this.createKtFile = lazyOf(null)
                 this.clearText = textWithMarkers
                 this.expectedText = this.clearText
-            }
-            else {
+            } else {
                 this.expectedText = textWithMarkers
                 this.clearText = CheckerTestUtil.parseDiagnosedRanges(addExtras(expectedText), diagnosedRanges)
                 this.createKtFile = lazy { TestCheckerUtil.createCheckAndReturnPsiFile(fileName, clearText, project) }
@@ -180,8 +187,7 @@ abstract class BaseDiagnosticsTest : KotlinMultiFileTestWithJava<TestModule, Tes
         private val extras: String
             get() = "/*extras*/\n$imports/*extras*/\n\n"
 
-        private fun addExtras(text: String): String =
-                addImports(text, extras)
+        private fun addExtras(text: String): String = addImports(text, extras)
 
         private fun stripExtras(actualText: StringBuilder) {
             val extras = extras
@@ -198,8 +204,7 @@ abstract class BaseDiagnosticsTest : KotlinMultiFileTestWithJava<TestModule, Tes
             if (matcher.find()) {
                 // add imports after the package directive
                 result = result.substring(0, matcher.end()) + imports + result.substring(matcher.end())
-            }
-            else {
+            } else {
                 // add imports at the beginning
                 result = imports + result
             }
@@ -212,10 +217,12 @@ abstract class BaseDiagnosticsTest : KotlinMultiFileTestWithJava<TestModule, Tes
         }
 
         fun getActualText(
-                bindingContext: BindingContext,
-                implementingModulesBindings: List<Pair<MultiTargetPlatform, BindingContext>>,
-                actualText: StringBuilder,
-                skipJvmSignatureDiagnostics: Boolean
+            bindingContext: BindingContext,
+            implementingModulesBindings: List<Pair<MultiTargetPlatform, BindingContext>>,
+            actualText: StringBuilder,
+            skipJvmSignatureDiagnostics: Boolean,
+            languageVersionSettings: LanguageVersionSettings,
+            moduleDescriptor: ModuleDescriptorImpl
         ): Boolean {
             val ktFile = this.ktFile
             if (ktFile == null) {
@@ -234,12 +241,23 @@ abstract class BaseDiagnosticsTest : KotlinMultiFileTestWithJava<TestModule, Tes
 
             val ok = booleanArrayOf(true)
             val withNewInference = newInferenceEnabled && withNewInferenceDirective && !USE_OLD_INFERENCE_DIAGNOSTICS_FOR_NI
-            val diagnostics = ContainerUtil.filter(
-                    CheckerTestUtil.getDiagnosticsIncludingSyntaxErrors(
-                            bindingContext, implementingModulesBindings, ktFile, markDynamicCalls, dynamicCallDescriptors, newInferenceEnabled
-                    ) + jvmSignatureDiagnostics,
+            val container = createContainerForTests(project, KotlinTestUtils.createEmptyModule())
+            val diagnostics = CheckerTestUtil.getDiagnosticsIncludingSyntaxErrors(
+                bindingContext,
+                implementingModulesBindings,
+                ktFile,
+                markDynamicCalls,
+                dynamicCallDescriptors,
+                newInferenceEnabled,
+                languageVersionSettings,
+                container.dataFlowValueFactory,
+                moduleDescriptor
+            ).run {
+                ContainerUtil.filter(
+                    this + jvmSignatureDiagnostics,
                     { whatDiagnosticsToConsider.value(it.diagnostic) }
-            )
+                )
+            }
 
             actualDiagnostics.addAll(diagnostics)
 
@@ -247,8 +265,8 @@ abstract class BaseDiagnosticsTest : KotlinMultiFileTestWithJava<TestModule, Tes
             val inferenceCompatibilityOfTest = asInferenceCompatibility(withNewInference)
             val invertedInferenceCompatibilityOfTest = asInferenceCompatibility(!withNewInference)
 
-            val diagnosticToExpectedDiagnostic = CheckerTestUtil.diagnosticsDiff(diagnosedRanges, diagnostics, object : CheckerTestUtil.DiagnosticDiffCallbacks {
-                override fun missingDiagnostic(diagnostic: CheckerTestUtil.TextDiagnostic, expectedStart: Int, expectedEnd: Int) {
+            val diagnosticToExpectedDiagnostic = CheckerTestUtil.diagnosticsDiff(diagnosedRanges, diagnostics, object : DiagnosticDiffCallbacks {
+                override fun missingDiagnostic(diagnostic: TextDiagnostic, expectedStart: Int, expectedEnd: Int) {
                     if (withNewInferenceDirective && diagnostic.inferenceCompatibility != inferenceCompatibilityOfTest) {
                         updateUncheckedDiagnostics(diagnostic, expectedStart, expectedEnd)
                         return
@@ -263,8 +281,8 @@ abstract class BaseDiagnosticsTest : KotlinMultiFileTestWithJava<TestModule, Tes
                 }
 
                 override fun wrongParametersDiagnostic(
-                        expectedDiagnostic: CheckerTestUtil.TextDiagnostic,
-                        actualDiagnostic: CheckerTestUtil.TextDiagnostic,
+                        expectedDiagnostic: TextDiagnostic,
+                        actualDiagnostic: TextDiagnostic,
                         start: Int,
                         end: Int
                 ) {
@@ -275,7 +293,7 @@ abstract class BaseDiagnosticsTest : KotlinMultiFileTestWithJava<TestModule, Tes
                     ok[0] = false
                 }
 
-                override fun unexpectedDiagnostic(diagnostic: CheckerTestUtil.TextDiagnostic, actualStart: Int, actualEnd: Int) {
+                override fun unexpectedDiagnostic(diagnostic: TextDiagnostic, actualStart: Int, actualEnd: Int) {
                     if (withNewInferenceDirective && diagnostic.inferenceCompatibility != inferenceCompatibilityOfTest) {
                         updateUncheckedDiagnostics(diagnostic, actualStart, actualEnd)
                         return
@@ -289,13 +307,20 @@ abstract class BaseDiagnosticsTest : KotlinMultiFileTestWithJava<TestModule, Tes
                     ok[0] = false
                 }
 
-                fun updateUncheckedDiagnostics(diagnostic: CheckerTestUtil.TextDiagnostic, start: Int, end: Int) {
+                fun updateUncheckedDiagnostics(diagnostic: TextDiagnostic, start: Int, end: Int) {
                     diagnostic.enhanceInferenceCompatibility(invertedInferenceCompatibilityOfTest)
-                    uncheckedDiagnostics.add(PositionalTextDiagnostic(diagnostic, start, end))
+                    uncheckedDiagnostics.add(
+                        PositionalTextDiagnostic(
+                            diagnostic,
+                            start,
+                            end
+                        )
+                    )
                 }
             })
 
-            actualText.append(CheckerTestUtil.addDiagnosticMarkersToText(
+            actualText.append(
+                CheckerTestUtil.addDiagnosticMarkersToText(
                     ktFile, diagnostics, diagnosticToExpectedDiagnostic, { file -> file.text }, uncheckedDiagnostics, withNewInferenceDirective)
             )
 
@@ -304,11 +329,11 @@ abstract class BaseDiagnosticsTest : KotlinMultiFileTestWithJava<TestModule, Tes
             return ok[0]
         }
 
-        private fun asInferenceCompatibility(isNewInference: Boolean): CheckerTestUtil.TextDiagnostic.InferenceCompatibility {
+        private fun asInferenceCompatibility(isNewInference: Boolean): TextDiagnostic.InferenceCompatibility {
             return if (isNewInference)
-                CheckerTestUtil.TextDiagnostic.InferenceCompatibility.NEW
+                TextDiagnostic.InferenceCompatibility.NEW
             else
-                CheckerTestUtil.TextDiagnostic.InferenceCompatibility.OLD
+                TextDiagnostic.InferenceCompatibility.OLD
         }
 
         private fun computeJvmSignatureDiagnostics(bindingContext: BindingContext): Set<ActualDiagnostic> {
@@ -326,15 +351,16 @@ abstract class BaseDiagnosticsTest : KotlinMultiFileTestWithJava<TestModule, Tes
     }
 
     companion object {
+        private const val HELPERS_PATH = "./compiler/testData/diagnostics/helpers"
         val DIAGNOSTICS_DIRECTIVE = "DIAGNOSTICS"
         val DIAGNOSTICS_PATTERN: Pattern = Pattern.compile("([\\+\\-!])(\\w+)\\s*")
         val DIAGNOSTICS_TO_INCLUDE_ANYWAY: Set<DiagnosticFactory<*>> = setOf(
-                Errors.UNRESOLVED_REFERENCE,
-                Errors.UNRESOLVED_REFERENCE_WRONG_RECEIVER,
-                CheckerTestUtil.SyntaxErrorDiagnosticFactory.INSTANCE,
-                CheckerTestUtil.DebugInfoDiagnosticFactory.ELEMENT_WITH_ERROR_TYPE,
-                CheckerTestUtil.DebugInfoDiagnosticFactory.MISSING_UNRESOLVED,
-                CheckerTestUtil.DebugInfoDiagnosticFactory.UNRESOLVED_WITH_TARGET
+            Errors.UNRESOLVED_REFERENCE,
+            Errors.UNRESOLVED_REFERENCE_WRONG_RECEIVER,
+            SyntaxErrorDiagnosticFactory.INSTANCE,
+            DebugInfoDiagnosticFactory0.ELEMENT_WITH_ERROR_TYPE,
+            DebugInfoDiagnosticFactory0.MISSING_UNRESOLVED,
+            DebugInfoDiagnosticFactory0.UNRESOLVED_WITH_TARGET
         )
 
         val DEFAULT_DIAGNOSTIC_TESTS_FEATURES = mapOf(
@@ -343,11 +369,6 @@ abstract class BaseDiagnosticsTest : KotlinMultiFileTestWithJava<TestModule, Tes
 
         val CHECK_TYPE_DIRECTIVE = "CHECK_TYPE"
         val CHECK_TYPE_PACKAGE = "tests._checkType"
-        private val CHECK_TYPE_DECLARATIONS = "\npackage " + CHECK_TYPE_PACKAGE +
-                                              "\nfun <T> checkSubtype(t: T) = t" +
-                                              "\nclass Inv<T>" +
-                                              "\nfun <E> Inv<E>._() {}" +
-                                              "\ninfix fun <T> T.checkType(f: Inv<T>.() -> Unit) {}"
         val CHECK_TYPE_IMPORT = "import $CHECK_TYPE_PACKAGE.*"
 
         val EXPLICIT_FLEXIBLE_TYPES_DIRECTIVE = "EXPLICIT_FLEXIBLE_TYPES"

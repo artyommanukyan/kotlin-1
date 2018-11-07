@@ -20,15 +20,21 @@ import com.google.common.collect.Lists;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiFile;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.kotlin.checkers.CheckerTestUtil.ActualDiagnostic;
-import org.jetbrains.kotlin.checkers.CheckerTestUtil.DiagnosedRange;
+import org.jetbrains.kotlin.checkers.diagnostics.ActualDiagnostic;
+import org.jetbrains.kotlin.checkers.diagnostics.TextDiagnostic;
+import org.jetbrains.kotlin.checkers.utils.CheckerTestUtil;
 import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment;
+import org.jetbrains.kotlin.config.LanguageVersionSettingsImpl;
+import org.jetbrains.kotlin.descriptors.impl.ModuleDescriptorImpl;
 import org.jetbrains.kotlin.psi.KtFile;
 import org.jetbrains.kotlin.resolve.BindingContext;
+import org.jetbrains.kotlin.resolve.calls.smartcasts.DataFlowValueFactory;
 import org.jetbrains.kotlin.resolve.lazy.JvmResolveUtil;
 import org.jetbrains.kotlin.test.ConfigurationKind;
 import org.jetbrains.kotlin.test.KotlinTestUtils;
 import org.jetbrains.kotlin.test.KotlinTestWithEnvironment;
+import org.jetbrains.kotlin.tests.di.ContainerForTests;
+import org.jetbrains.kotlin.tests.di.InjectionKt;
 
 import java.io.File;
 import java.util.List;
@@ -144,33 +150,37 @@ public class CheckerTestUtilTest extends KotlinTestWithEnvironment {
             BindingContext bindingContext =
                     JvmResolveUtil.analyze((KtFile) psiFile, environment).getBindingContext();
 
-            String expectedText = CheckerTestUtil.addDiagnosticMarkersToText(
+            ModuleDescriptorImpl emptyModule = KotlinTestUtils.createEmptyModule();
+            ContainerForTests container = InjectionKt.createContainerForTests(environment.getProject(), emptyModule);
+            DataFlowValueFactory dataFlowValueFactory = container.getDataFlowValueFactory();
+
+            String expectedText = CheckerTestUtil.INSTANCE.addDiagnosticMarkersToText(
                     psiFile,
-                    CheckerTestUtil.getDiagnosticsIncludingSyntaxErrors(bindingContext, psiFile, false, null, null, false)
+                    CheckerTestUtil.INSTANCE.getDiagnosticsIncludingSyntaxErrors(bindingContext, psiFile, false, null, null, false,
+                                                                        LanguageVersionSettingsImpl.DEFAULT, dataFlowValueFactory, null)
             ).toString();
 
             List<DiagnosedRange> diagnosedRanges = Lists.newArrayList();
-            CheckerTestUtil.parseDiagnosedRanges(expectedText, diagnosedRanges);
+            CheckerTestUtil.INSTANCE.parseDiagnosedRanges(expectedText, diagnosedRanges);
 
             List<ActualDiagnostic> actualDiagnostics =
-                    CheckerTestUtil.getDiagnosticsIncludingSyntaxErrors(bindingContext, psiFile, false, null, null, false);
-            actualDiagnostics.sort(CheckerTestUtil.DIAGNOSTIC_COMPARATOR);
-
+                    CheckerTestUtil.INSTANCE.getDiagnosticsIncludingSyntaxErrors(bindingContext, psiFile, false, null, null, false,
+                                                                        LanguageVersionSettingsImpl.DEFAULT, dataFlowValueFactory, null);
             makeTestData(actualDiagnostics, diagnosedRanges);
 
             List<String> expectedMessages = Lists.newArrayList(expected);
             List<String> actualMessages = Lists.newArrayList();
 
-            CheckerTestUtil.diagnosticsDiff(diagnosedRanges, actualDiagnostics, new CheckerTestUtil.DiagnosticDiffCallbacks() {
+            CheckerTestUtil.INSTANCE.diagnosticsDiff(diagnosedRanges, actualDiagnostics, new DiagnosticDiffCallbacks() {
                 @Override
-                public void missingDiagnostic(CheckerTestUtil.TextDiagnostic diagnostic, int expectedStart, int expectedEnd) {
+                public void missingDiagnostic(TextDiagnostic diagnostic, int expectedStart, int expectedEnd) {
                     actualMessages.add(missing(diagnostic.getDescription(), expectedStart, expectedEnd));
                 }
 
                 @Override
                 public void wrongParametersDiagnostic(
-                        CheckerTestUtil.TextDiagnostic expectedDiagnostic,
-                        CheckerTestUtil.TextDiagnostic actualDiagnostic,
+                        TextDiagnostic expectedDiagnostic,
+                        TextDiagnostic actualDiagnostic,
                         int start,
                         int end
                 ) {
@@ -178,7 +188,7 @@ public class CheckerTestUtilTest extends KotlinTestWithEnvironment {
                 }
 
                 @Override
-                public void unexpectedDiagnostic(CheckerTestUtil.TextDiagnostic diagnostic, int actualStart, int actualEnd) {
+                public void unexpectedDiagnostic(TextDiagnostic diagnostic, int actualStart, int actualEnd) {
                     actualMessages.add(unexpected(diagnostic.getDescription(), actualStart, actualEnd));
                 }
             });
