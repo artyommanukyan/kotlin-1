@@ -5,16 +5,12 @@
 
 package org.jetbrains.kotlin.resolve.jvm.multiplatform
 
-import com.intellij.psi.PsiAnnotationMethod
 import org.jetbrains.kotlin.builtins.KotlinBuiltIns
 import org.jetbrains.kotlin.builtins.jvm.JavaToKotlinClassMap
 import org.jetbrains.kotlin.descriptors.ValueParameterDescriptor
 import org.jetbrains.kotlin.load.java.components.JavaPropertyInitializerEvaluatorImpl
 import org.jetbrains.kotlin.load.java.sources.JavaSourceElement
 import org.jetbrains.kotlin.load.java.structure.*
-import org.jetbrains.kotlin.load.java.structure.impl.JavaAnnotationArgumentImpl
-import org.jetbrains.kotlin.load.java.structure.impl.JavaMethodImpl
-import org.jetbrains.kotlin.load.java.structure.impl.classFiles.BinaryJavaMethod
 import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.resolve.checkers.ExpectedActualDeclarationChecker
@@ -27,16 +23,8 @@ import org.jetbrains.kotlin.types.typeUtil.builtIns
 
 class JavaActualAnnotationArgumentExtractor : ExpectedActualDeclarationChecker.ActualAnnotationArgumentExtractor {
     override fun extractDefaultValue(parameter: ValueParameterDescriptor, expectedType: KotlinType): ConstantValue<*>? {
-        val source = (parameter.source as? JavaSourceElement)?.javaElement
-        // TODO: add instance property `JavaMethod.defaultValue: JavaAnnotationArgument` and use it here
-        return when (source) {
-            is JavaMethodImpl -> (source.psi as? PsiAnnotationMethod)
-                ?.defaultValue
-                ?.let { JavaAnnotationArgumentImpl.create(it, null) }
-                ?.convert(expectedType)
-            is BinaryJavaMethod -> source.annotationParameterDefaultValue?.convert(expectedType)
-            else -> null
-        }
+        val element = (parameter.source as? JavaSourceElement)?.javaElement
+        return (element as? JavaMethod)?.annotationParameterDefaultValue?.convert(expectedType)
     }
 
     // This code is similar to LazyJavaAnnotationDescriptor.resolveAnnotationArgument, but cannot be reused until
