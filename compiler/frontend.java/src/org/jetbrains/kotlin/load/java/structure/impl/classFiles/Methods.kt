@@ -169,7 +169,10 @@ class BinaryJavaMethod(
 ) : BinaryJavaMethodBase(
         flags, containingClass, valueParameters, typeParameters, name
 ), JavaMethod {
-    override var hasAnnotationParameterDefaultValue: Boolean = false
+    var annotationParameterDefaultValue: JavaAnnotationArgument? = null
+        internal set
+
+    override val hasAnnotationParameterDefaultValue: Boolean get() = annotationParameterDefaultValue != null
 }
 
 class BinaryJavaConstructor(
