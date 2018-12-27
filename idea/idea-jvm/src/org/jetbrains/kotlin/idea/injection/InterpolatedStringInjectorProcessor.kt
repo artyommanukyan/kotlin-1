@@ -45,70 +45,57 @@ fun splitLiteralToInjectionParts(injection: BaseInjection, literal: KtStringTemp
     tailrec fun collectInjections(
         children: List<PsiElement>,
         pendingPrefix: String,
-        unparseble: Boolean,
+        unparseable: Boolean,
         collected: MutableList<Injection>
     ): InjectionSplitResult {
-        val child = children.firstOrNull() ?: return InjectionSplitResult(unparseble, collected)
+        val child = children.firstOrNull() ?: return InjectionSplitResult(unparseable, collected)
         val tail = children.subList(1, children.size)
         val partOffsetInParent = child.startOffsetInParent
 
         val suffix = if (tail.isEmpty()) injection.suffix else ""
 
-        when (child) {
-            is KtLiteralStringTemplateEntry, is KtEscapeStringTemplateEntry -> {
-                val consequentStringsCount = tail.asSequence()
-                    .takeWhile { it is KtLiteralStringTemplateEntry || it is KtEscapeStringTemplateEntry }
-                    .count()
+        if (child is KtLiteralStringTemplateEntry || child is KtEscapeStringTemplateEntry) {
+            val consequentStringsCount = tail.asSequence()
+                .takeWhile { it is KtLiteralStringTemplateEntry || it is KtEscapeStringTemplateEntry }
+                .count()
 
-                val lastChild = children[consequentStringsCount]
-                val remaining = tail.subList(consequentStringsCount, tail.size)
+            val lastChild = children[consequentStringsCount]
+            val remaining = tail.subList(consequentStringsCount, tail.size)
 
-                collected += injectionRange(
-                    TextRange.create(partOffsetInParent, lastChild.startOffsetInParent + lastChild.textLength),
-                    pendingPrefix,
-                    if (remaining.isEmpty()) injection.suffix else ""
-                )
-                return collectInjections(remaining, "", unparseble, collected)
+            collected += injectionRange(
+                TextRange.create(partOffsetInParent, lastChild.startOffsetInParent + lastChild.textLength),
+                pendingPrefix,
+                if (remaining.isEmpty()) injection.suffix else ""
+            )
+            return collectInjections(remaining, "", unparseable, collected)
+        } else {
+            if (!pendingPrefix.isEmpty() || collected.isEmpty()) {
+                // storing pending prefix before creating a new one
+                // or if it is a first part then creating a dummy injection to distinguish "inner" prefixes
+                collected += injectionRange(TextRange.from(partOffsetInParent, 0), pendingPrefix, suffix)
             }
 
-            else -> {
-                if (!pendingPrefix.isEmpty()) {
-                    // Store part with prefix before replacing it
-                    collected += injectionRange(TextRange.from(partOffsetInParent, 0), pendingPrefix, suffix)
-                }
+            val (prefix, myUnparseable) = makePlaceholder(child)
 
-                val (prefix, myUnparseble) = when (child) {
-                    is KtSimpleNameStringTemplateEntry ->
-                        tryEvaluateConstant(child.expression)?.let { it to false } ?: ((child.expression?.text ?: NO_VALUE_NAME) to true)
-                    is KtBlockStringTemplateEntry ->
-                        tryEvaluateConstant(child.expression)?.let { it to false } ?: (NO_VALUE_NAME to true)
-                    else ->
-                        ((child.text ?: NO_VALUE_NAME) to true)
-                }
-
-                if (tail.isEmpty() && !prefix.isEmpty()) {
-                    // There won't be more elements, so create part with prefix right away
-                    collected += injectionRange(TextRange.from(partOffsetInParent + child.textLength, 0), prefix, suffix)
-                }
-                return collectInjections(tail, prefix, unparseble || myUnparseble, collected)
+            if (tail.isEmpty() && !prefix.isEmpty()) {
+                // There won't be more elements, so create part with prefix right away
+                collected += injectionRange(TextRange.from(partOffsetInParent + child.textLength, 0), prefix, suffix)
             }
+            return collectInjections(tail, prefix, unparseable || myUnparseable, collected)
         }
     }
 
-    val children = literal.children.toList()
-    val firstChild = children.firstOrNull() ?: return null
-    return if (firstChild is KtSimpleNameStringTemplateEntry || firstChild is KtBlockStringTemplateEntry) {
-        val collected = ArrayList<Injection>()
-        collected += injectionRange(
-            TextRange.from(firstChild.startOffsetInParent, 0),
-            injection.prefix,
-            if (children.size == 1) injection.suffix else ""
-        )
-        collectInjections(children, "", false, collected)
-    } else
-        collectInjections(children, injection.prefix, false, ArrayList())
+    return collectInjections(literal.children.toList(), injection.prefix, false, ArrayList())
 }
 
+private fun makePlaceholder(child: PsiElement): Pair<String, Boolean> = when (child) {
+    is KtSimpleNameStringTemplateEntry ->
+        tryEvaluateConstant(child.expression)?.let { it to false } ?: ((child.expression?.text ?: NO_VALUE_NAME) to true)
+    is KtBlockStringTemplateEntry ->
+        tryEvaluateConstant(child.expression)?.let { it to false } ?: (NO_VALUE_NAME to true)
+    else ->
+        ((child.text ?: NO_VALUE_NAME) to true)
+}
 
 private fun tryEvaluateConstant(ktExpression: KtExpression?) =
     ktExpression?.let { expression ->
