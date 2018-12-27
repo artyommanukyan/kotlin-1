@@ -38,7 +38,14 @@ internal class AnnotationsAndParameterCollectorMethodVisitor(
 
     override fun visitAnnotationDefault(): AnnotationVisitor? =
         BinaryJavaAnnotationVisitor(context, signatureParser) {
-            member.safeAs<BinaryJavaMethod>()?.annotationParameterDefaultValue = it
+            if (member is BinaryJavaMethod) {
+                if (member.annotationParameterDefaultValue != null) {
+                    throw AssertionError(
+                        "Annotation method cannot have two default values: $member (value=${member.annotationParameterDefaultValue})"
+                    )
+                }
+                member.annotationParameterDefaultValue = it
+            }
         }
 
     override fun visitParameter(name: String?, access: Int) {
