@@ -17,7 +17,7 @@
 package org.jetbrains.kotlin.codegen.range
 
 import org.jetbrains.kotlin.builtins.KotlinBuiltIns
-import org.jetbrains.kotlin.codegen.*
+import org.jetbrains.kotlin.codegen.ExpressionCodegen
 import org.jetbrains.kotlin.config.LanguageFeature
 import org.jetbrains.kotlin.descriptors.CallableDescriptor
 import org.jetbrains.kotlin.descriptors.impl.LocalVariableDescriptor
@@ -119,6 +119,8 @@ private fun ExpressionCodegen.createIntrinsifiedRangeValueOrNull(rangeCall: Reso
 
     return when {
         isPrimitiveNumberRangeTo(rangeCallee) ->
+            PrimitiveNumberRangeLiteralRangeValue(rangeCall)
+        isUnsignedIntegerRangeTo(rangeCallee) ->
             PrimitiveNumberRangeLiteralRangeValue(rangeCall)
         isPrimitiveNumberDownTo(rangeCallee) ->
             DownToProgressionRangeValue(rangeCall)
