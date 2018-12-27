@@ -1,3 +1,4 @@
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
     kotlin("jvm")
@@ -70,4 +71,10 @@ testsJar {}
 
 projectTest {
     workingDir = rootDir
+}
+
+val compileKotlin: KotlinCompile by tasks
+compileKotlin.kotlinOptions {
+    jvmTarget = "1.8"
+    freeCompilerArgs = listOf("-Xjvm-default=enable")
 }
